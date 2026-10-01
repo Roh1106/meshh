@@ -37,6 +37,8 @@ export interface SkillSwapListing {
 
 export interface AcademicResource {
   id: string;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  submittedById?: string;
   title: string;
   subject: string;
   topic: string;

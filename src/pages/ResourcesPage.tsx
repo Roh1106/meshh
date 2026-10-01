@@ -6,10 +6,11 @@ import { SearchBar } from '../components/ui/SearchBar';
 import { EmptyState } from '../components/ui/EmptyState';
 import { CardSkeleton } from '../components/ui/Skeleton';
 import { resourceService } from '../services/resourceService';
-import { resourcesRepository, karmaRepository, historyRepository } from '../repositories';
+import { karmaRepository, historyRepository } from '../repositories';
 import { resourceValidationService } from '../services/resourceValidationService';
 import { AcademicResource, ResourceReportReason } from '../types';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { ArrowDownToLine, CheckCircle2, Upload, Filter, AlertTriangle, ShieldCheck, Flag } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { PdfViewerModal, PdfDocument } from '../components/common/PdfViewerModal';
@@ -17,6 +18,7 @@ import { PdfViewerModal, PdfDocument } from '../components/common/PdfViewerModal
 export const ResourcesPage: React.FC = () => {
   const navigate = useNavigate();
   const { showSuccess, showInfo, showError, showWarning } = useToast();
+  const { currentUser, isAdmin } = useAuth();
 
   const [resources, setResources] = useState<AcademicResource[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -103,7 +105,7 @@ export const ResourcesPage: React.FC = () => {
         semester: newSemester,
         department: newDepartment,
         language: 'English',
-        authorName: 'Rohan Ranmale (Student Contributor)',
+        authorName: currentUser.name,
       });
 
       if (!validation.isValid) {
@@ -127,13 +129,15 @@ export const ResourcesPage: React.FC = () => {
         semester: newSemester,
         department: newDepartment,
         language: 'English',
-        verified: validation.status === 'Verified',
-        verifiedBy: validation.status === 'Verified' ? 'Automated Topic Match' : 'Pending Peer Review',
+        approvalStatus: isAdmin ? 'approved' : 'pending',
+        submittedById: currentUser.id,
+        verified: isAdmin,
+        verifiedBy: isAdmin ? currentUser.name : undefined,
         rating: 5.0,
         ratingsCount: 1,
         downloadCount: 1,
-        author: 'Rohan Ranmale',
-        authorRole: '3rd Year Contributor',
+        author: currentUser.name,
+        authorRole: isAdmin ? 'Administrator' : `${currentUser.year || 'Student'} Contributor`,
         updatedAt: 'Just now',
         description: newDescription.trim(),
         isSaved: true,
@@ -141,16 +145,18 @@ export const ResourcesPage: React.FC = () => {
       };
 
       // 3. Save into local repository
-      await resourcesRepository.save(newResource);
+      await resourceService.saveResource(newResource, uploadFile);
 
       // 4. Log Karma Transaction (+15 for resource contribution)
-      await karmaRepository.addTransaction({
-        userId: 'current_user',
-        amount: 15,
-        action: 'resource_contribution',
-        description: `Contributed academic PDF notes: ${newResource.title}`,
-        referenceId: newResource.id,
-      });
+      if (isAdmin) {
+        await karmaRepository.addTransaction({
+          userId: currentUser.id,
+          amount: 15,
+          action: 'resource_contribution',
+          description: `Published academic PDF notes: ${newResource.title}`,
+          referenceId: newResource.id,
+        });
+      }
 
       // 5. Append to Activity History
       await historyRepository.addEvent({
@@ -158,15 +164,17 @@ export const ResourcesPage: React.FC = () => {
         title: `Contributed: ${newResource.title}`,
         timestamp: 'Just now',
         dateGroup: 'Today',
-        status: validation.status,
+        status: isAdmin ? 'Published by administrator' : 'Pending administrator review',
         details: `${newResource.subject} · ${newResource.fileSize}`,
       });
 
       // Refresh list
-      setResources((prev) => [newResource, ...prev]);
+      if (isAdmin) setResources((prev) => [newResource, ...prev]);
       showSuccess(
-        `Resource "${newTitle}" verified and saved locally. +15 Karma awarded!`,
-        'Upload Successful'
+        isAdmin
+          ? `"${newTitle}" is published and available to students.`
+          : `"${newTitle}" was submitted. An administrator must read and approve it before students can access it.`,
+        isAdmin ? 'Resource Published' : 'Submitted for Review'
       );
 
       // Reset form
@@ -199,7 +207,7 @@ export const ResourcesPage: React.FC = () => {
     <div className="space-y-4 pb-12">
       <PageHeader
         title="Academic Resources"
-        description="Peer-validated course notes, faculty-approved cheat sheets, and lab guides with offline storage."
+        description="Administrators publish resources. Student submissions stay private until an administrator reads and approves them."
         action={
           <button
             onClick={() => {
@@ -210,7 +218,7 @@ export const ResourcesPage: React.FC = () => {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors shadow-2xs"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span>Contribute Notes</span>
+            <span>{isAdmin ? 'Upload Resource' : 'Submit Resource'}</span>
           </button>
         }
       />
@@ -340,8 +348,10 @@ export const ResourcesPage: React.FC = () => {
       <Modal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
-        title="Contribute Academic PDF Material"
-        description="Every uploaded resource undergoes format validation, duplicate detection, and topic alignment."
+        title={isAdmin ? 'Publish Academic PDF Resource' : 'Submit Academic PDF for Review'}
+        description={isAdmin
+          ? 'Administrator uploads are published immediately. Review student submissions in the Admin Console.'
+          : 'Your PDF will only be visible to administrators until it has been read and approved.'}
         maxWidth="lg"
       >
         <form onSubmit={handleUploadSubmit} className="space-y-3 text-xs sm:text-sm">
@@ -487,9 +497,9 @@ export const ResourcesPage: React.FC = () => {
 
           <div className="p-3 bg-blue-50/60 rounded-lg border border-blue-100 text-xs text-blue-900 flex items-start gap-2">
             <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-            <span>
-              Validated contributions earn <strong>+15 Karma</strong> and become accessible to all nearby campus students via ad-hoc local mesh.
-            </span>
+            <span>{isAdmin
+              ? 'As an administrator, you can publish this resource directly to the student library.'
+              : 'Only administrators can open submitted PDFs for review. Approval is required before publication.'}</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-2">
@@ -505,7 +515,7 @@ export const ResourcesPage: React.FC = () => {
               disabled={isUploading}
               className="w-full h-9 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-2xs disabled:opacity-50"
             >
-              {isUploading ? 'Validating & Fingerprinting...' : 'Validate & Publish'}
+              {isUploading ? 'Validating & Saving...' : isAdmin ? 'Validate & Publish' : 'Submit for Admin Review'}
             </button>
           </div>
         </form>

@@ -1,4 +1,5 @@
 import { AcademicResource } from '../types';
+import { localDb, STORES } from '../db/indexedDB';
 
 export const INITIAL_RESOURCES: AcademicResource[] = [
   {
@@ -116,7 +117,13 @@ export const INITIAL_RESOURCES: AcademicResource[] = [
 ];
 
 class ResourceService {
-  private resources: AcademicResource[] = [...INITIAL_RESOURCES];
+  private async getAllResources(): Promise<AcademicResource[]> {
+    const storedResources = await localDb.getAll<AcademicResource>(STORES.RESOURCES);
+    if (storedResources.length > 0) return storedResources;
+
+    await localDb.putBatch(STORES.RESOURCES, INITIAL_RESOURCES);
+    return [...INITIAL_RESOURCES];
+  }
 
   async getResources(params?: {
     query?: string;
@@ -124,10 +131,13 @@ class ResourceService {
     format?: string;
     offlineOnly?: boolean;
     verifiedOnly?: boolean;
+    includePending?: boolean;
   }): Promise<AcademicResource[]> {
     await new Promise((r) => setTimeout(r, 70));
+    const resources = await this.getAllResources();
 
-    return this.resources.filter((res) => {
+    return resources.filter((res) => {
+      if (!params?.includePending && (res.approvalStatus === 'pending' || res.approvalStatus === 'rejected')) return false;
       if (params?.query) {
         const q = params.query.toLowerCase();
         const matchesTitle = res.title.toLowerCase().includes(q);
@@ -157,27 +167,55 @@ class ResourceService {
     });
   }
 
-  async getResourceById(id: string): Promise<AcademicResource | undefined> {
+  async getResourceById(id: string, includePending = false): Promise<AcademicResource | undefined> {
     await new Promise((r) => setTimeout(r, 60));
-    return this.resources.find((r) => r.id === id);
+    const resource = (await this.getAllResources()).find((r) => r.id === id);
+    if (!includePending && (resource?.approvalStatus === 'pending' || resource?.approvalStatus === 'rejected')) return undefined;
+    return resource;
+  }
+
+  async saveResource(resource: AcademicResource, file: File): Promise<void> {
+    await localDb.put(STORES.RESOURCES, resource);
+    await localDb.put(STORES.RESOURCE_FILES, { id: resource.id, file });
+  }
+
+  async getResourceFileUrl(resourceId: string): Promise<string | null> {
+    const stored = await localDb.getById<{ id: string; file: Blob }>(STORES.RESOURCE_FILES, resourceId);
+    return stored?.file ? URL.createObjectURL(stored.file) : null;
+  }
+
+  async setApprovalStatus(resourceId: string, status: 'approved' | 'rejected', reviewerName: string): Promise<AcademicResource | undefined> {
+    const resource = (await this.getAllResources()).find((item) => item.id === resourceId);
+    if (!resource || resource.approvalStatus !== 'pending') return undefined;
+
+    const updated: AcademicResource = {
+      ...resource,
+      approvalStatus: status,
+      verified: status === 'approved',
+      verifiedBy: status === 'approved' ? reviewerName : undefined,
+    };
+    await localDb.put(STORES.RESOURCES, updated);
+    return updated;
   }
 
   async toggleOfflineSave(resourceId: string): Promise<boolean> {
-    const res = this.resources.find((r) => r.id === resourceId);
+    const res = await this.getResourceById(resourceId);
     if (res) {
       res.isOfflineAvailable = !res.isOfflineAvailable;
       if (res.isOfflineAvailable) {
         res.downloadCount += 1;
       }
+      await localDb.put(STORES.RESOURCES, res);
       return res.isOfflineAvailable;
     }
     return false;
   }
 
   async toggleBookmark(resourceId: string): Promise<boolean> {
-    const res = this.resources.find((r) => r.id === resourceId);
+    const res = await this.getResourceById(resourceId);
     if (res) {
       res.isSaved = !res.isSaved;
+      await localDb.put(STORES.RESOURCES, res);
       return res.isSaved;
     }
     return false;

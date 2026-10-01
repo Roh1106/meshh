@@ -1,12 +1,13 @@
 import { logger } from '../utils/logger';
 
 const DB_NAME = 'skillmesh_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORES = {
   USERS: 'users',
   SKILLS: 'skills',
   RESOURCES: 'resources',
+  RESOURCE_FILES: 'resource_files',
   QUESTIONS: 'questions',
   SESSIONS: 'sessions',
   TESTS: 'tests',

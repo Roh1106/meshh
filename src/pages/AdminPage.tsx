@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { courseService, StudentRegistrationRecord, Course } from '../services/courseService';
 import { resourceService } from '../services/resourceService';
+import { karmaRepository } from '../repositories';
 import { testService } from '../services/testService';
 import { AcademicResource, PracticeTest } from '../types';
 import {
@@ -46,6 +47,9 @@ export const AdminPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'registrations' | 'courses' | 'resources' | 'tests'>('registrations');
   const [searchQuery, setSearchQuery] = useState('');
   const [syllabusCourse, setSyllabusCourse] = useState<Course | null>(null);
+  const [reviewingResource, setReviewingResource] = useState<AcademicResource | null>(null);
+  const [reviewPdfUrl, setReviewPdfUrl] = useState<string | null>(null);
+  const [hasReadReviewPdf, setHasReadReviewPdf] = useState(false);
 
   // Register Student Modal State
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
@@ -79,7 +83,7 @@ export const AdminPage: React.FC = () => {
         const [regs, courseList, resList, testList] = await Promise.all([
           courseService.getAllRegistrations(),
           courseService.getCourses(),
-          resourceService.getResources(),
+          resourceService.getResources({ includePending: true }),
           testService.getTests(),
         ]);
         if (mounted) {
@@ -204,11 +208,43 @@ export const AdminPage: React.FC = () => {
     showSuccess('Student course registration verified & officially approved.');
   };
 
-  const handleVerifyResource = (id: string) => {
-    setResources((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, verified: true, verifiedBy: 'HOD Certified' } : r))
-    );
-    showSuccess('Academic material certified and marked as Faculty Approved.');
+  const handleOpenResourceForReview = async (resource: AcademicResource) => {
+    const fileUrl = await resourceService.getResourceFileUrl(resource.id);
+    if (!fileUrl) {
+      showError('The submitted PDF is not available in this browser. Ask the student to submit it again.');
+      return;
+    }
+    setReviewingResource(resource);
+    setReviewPdfUrl(fileUrl);
+    setHasReadReviewPdf(false);
+  };
+
+  const closeResourceReview = () => {
+    if (reviewPdfUrl) URL.revokeObjectURL(reviewPdfUrl);
+    setReviewingResource(null);
+    setReviewPdfUrl(null);
+    setHasReadReviewPdf(false);
+  };
+
+  const handleResourceDecision = async (status: 'approved' | 'rejected') => {
+    if (!reviewingResource || !hasReadReviewPdf) return;
+    const updated = await resourceService.setApprovalStatus(reviewingResource.id, status, currentUser.name);
+    if (!updated) return;
+
+    setResources((previous) => previous.map((resource) => resource.id === updated.id ? updated : resource));
+    if (status === 'approved' && updated.submittedById) {
+      await karmaRepository.addTransaction({
+        userId: updated.submittedById,
+        amount: 15,
+        action: 'resource_contribution',
+        description: `Administrator approved resource: ${updated.title}`,
+        referenceId: updated.id,
+      });
+    }
+    showSuccess(status === 'approved'
+      ? `"${updated.title}" was approved and is now visible to students.`
+      : `"${updated.title}" was rejected and will remain hidden from students.`);
+    closeResourceReview();
   };
 
   const handleCreateHigherTest = async (e: React.FormEvent) => {
@@ -403,7 +439,7 @@ export const AdminPage: React.FC = () => {
           }`}
         >
           <FileText className="w-3.5 h-3.5" />
-          <span>Freely Available Resources ({resources.length})</span>
+            <span>Resource Review ({resources.filter((resource) => resource.approvalStatus === 'pending').length} pending)</span>
         </button>
 
         <button
@@ -564,7 +600,7 @@ export const AdminPage: React.FC = () => {
       {activeTab === 'resources' && (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Faculty Review for Open Campus Study Materials & Cheat Sheets</span>
+            <span>Read each student-submitted PDF before approving it for the student library.</span>
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200/90 divide-y divide-gray-100 shadow-xs">
@@ -576,7 +612,13 @@ export const AdminPage: React.FC = () => {
                     <span className="px-1.5 py-0.2 bg-gray-100 text-gray-700 rounded text-[11px]">
                       {res.format} · {res.fileSize}
                     </span>
-                    {res.verified && (
+                    {res.approvalStatus === 'pending' && (
+                      <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded text-[11px] font-semibold">Pending review</span>
+                    )}
+                    {res.approvalStatus === 'rejected' && (
+                      <span className="px-1.5 py-0.2 bg-red-100 text-red-800 rounded text-[11px] font-semibold">Rejected</span>
+                    )}
+                    {(res.verified || res.approvalStatus === 'approved') && (
                       <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded text-[11px] font-semibold flex items-center gap-1">
                         <CheckCircle className="w-3 h-3" />
                         <span>{res.verifiedBy || 'Approved'}</span>
@@ -589,12 +631,12 @@ export const AdminPage: React.FC = () => {
                   <p className="text-gray-600 text-xs mt-1">{res.description}</p>
                 </div>
 
-                {!res.verified && (
+                {res.approvalStatus === 'pending' && (
                   <button
-                    onClick={() => handleVerifyResource(res.id)}
+                    onClick={() => void handleOpenResourceForReview(res)}
                     className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shrink-0"
                   >
-                    Certify Resource
+                    Read & Review PDF
                   </button>
                 )}
               </div>
@@ -724,6 +766,36 @@ export const AdminPage: React.FC = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!reviewingResource}
+        onClose={closeResourceReview}
+        title={reviewingResource ? `Review: ${reviewingResource.title}` : 'Review Resource'}
+        description="Read the submitted PDF. Approval publishes it to the student resource library."
+        maxWidth="lg"
+      >
+        {reviewingResource && reviewPdfUrl && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+              <span>Submitted by: <strong>{reviewingResource.author}</strong></span>
+              <span>Subject: <strong>{reviewingResource.subject}</strong></span>
+            </div>
+            <iframe
+              title={`Review PDF: ${reviewingResource.title}`}
+              src={reviewPdfUrl}
+              onLoad={() => setHasReadReviewPdf(true)}
+              className="h-[60vh] w-full rounded-lg border border-gray-300"
+            />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">{hasReadReviewPdf ? 'PDF opened. You may record your review.' : 'Loading submitted PDF…'}</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => void handleResourceDecision('rejected')} disabled={!hasReadReviewPdf} className="px-3 py-2 rounded-lg border border-red-200 text-red-700 text-xs font-semibold disabled:opacity-50">Reject</button>
+                <button type="button" onClick={() => void handleResourceDecision('approved')} disabled={!hasReadReviewPdf} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50">Approve & Publish</button>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal 2: Add New Course */}
