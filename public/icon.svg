@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="104" fill="#2563EB"/>
+  <!-- Central Mesh Network & Academic Cap / Book nodes -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 128 L384 192 L256 256 L128 192 Z" />
+    <path d="M168 214 V318 C168 344 207 368 256 368 C305 368 344 344 344 318 V214" />
+    <path d="M384 192 V304" />
+    <!-- Mesh nodes -->
+    <line x1="256" y1="368" x2="256" y2="416" />
+    <line x1="168" y1="318" x2="112" y2="352" />
+    <line x1="344" y1="318" x2="400" y2="352" />
+  </g>
+  <circle cx="256" cy="416" r="20" fill="#FFFFFF" />
+  <circle cx="112" cy="352" r="18" fill="#FFFFFF" />
+  <circle cx="400" cy="352" r="18" fill="#FFFFFF" />
+  <circle cx="256" cy="256" r="12" fill="#93C5FD" />
+</svg>

@@ -1,0 +1,6 @@
+{
+  "name": "SkillMesh",
+  "description": "Offline-first peer learning, skill exchange, course registration and academic testing for Bharti Vidyapeeth College of Engineering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
