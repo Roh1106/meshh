@@ -38,7 +38,13 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match('/index.html') as Promise<Response>;
+        return caches.match('/index.html').then((cached) => {
+          return cached || new Response('Offline: Application shell is not cached.', {
+            status: 503,
+            statusText: 'Service Unavailable (Offline)',
+            headers: new Headers({ 'Content-Type': 'text/plain' }),
+          });
+        });
       })
     );
     return;

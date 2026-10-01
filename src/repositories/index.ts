@@ -337,7 +337,7 @@ export const syncRepository = {
       timestamp: new Date().toISOString(),
     };
     logger.info('SYNC', `Recorded local synchronizable change: ${event.entityType} (${event.operation})`);
-    return await localDb.put(STORES.SYNC_EVENTS, event);
+    return await localDb.put(STORES.SYNC_EVENTS, { ...event, id: event.eventId });
   },
 
   async clearChanges(eventIds: string[]): Promise<void> {
